@@ -4,14 +4,18 @@ import uuid
 import subprocess
 import boto3
 import shutil
+import logging
 from werkzeug.utils import secure_filename
 from botocore.exceptions import ClientError, NoCredentialsError
 
 app = Flask(__name__)
 
-# Configuration
+# --- 설정 및 상수 ---
 MAX_FILE_SIZE = 16 * 1024 * 1024  # 16MB
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
+
+# Flask 자체 최대 요청 크기 설정
+app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
 
 # S3 설정
 S3_BUCKET = os.environ.get('S3_BUCKET_NAME')
@@ -19,6 +23,18 @@ if not S3_BUCKET:
     raise ValueError("S3_BUCKET_NAME environment variable is required")
 
 S3_BASE_URL = f"https://{S3_BUCKET}.s3.amazonaws.com"
+
+# 기본 디렉토리 경로
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+EXAMPLES_DIR = os.path.join(BASE_DIR, 'examples')
+DRAWINGS_DIR = os.path.join(EXAMPLES_DIR, 'drawings')
+os.makedirs(DRAWINGS_DIR, exist_ok=True)
+
+# 로깅 설정
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s][%(levelname)s] %(message)s',
+)
 
 # S3 클라이언트 초기화
 try:
@@ -34,13 +50,7 @@ except NoCredentialsError:
 except ClientError as e:
     raise ValueError(f"S3 bucket access error: {e}")
 
-# 디렉토리 설정
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-EXAMPLES_DIR = os.path.join(BASE_DIR, 'examples')
-DRAWINGS_DIR = os.path.join(EXAMPLES_DIR, 'drawings')
-
-os.makedirs(DRAWINGS_DIR, exist_ok=True)
-
+# --- 유틸 함수 ---
 def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -50,17 +60,19 @@ def cleanup_files(*file_paths):
         try:
             if os.path.isfile(file_path):
                 os.remove(file_path)
-                print(f"[INFO] Cleaned up file: {file_path}")
+                logging.info(f"Cleaned up file: {file_path}")
             elif os.path.isdir(file_path):
                 shutil.rmtree(file_path)
-                print(f"[INFO] Cleaned up directory: {file_path}")
+                logging.info(f"Cleaned up directory: {file_path}")
         except Exception as e:
-            print(f"[WARNING] Failed to cleanup {file_path}: {e}")
+            logging.warning(f"Failed to cleanup {file_path}: {e}")
 
+# --- 에러 핸들러 ---
 @app.errorhandler(413)
 def too_large(e):
     return jsonify({'error': 'File too large'}), 413
 
+# --- 라우터 ---
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({'status': 'healthy'}), 200
@@ -70,7 +82,11 @@ def generate_gif_inside():
     if 'image' not in request.files:
         return jsonify({'error': 'No image file provided'}), 400
 
+    if 'skeleton_json' not in request.files:
+        return jsonify({'error': 'No skeleton_json file provided'}), 400
+
     image_file = request.files['image']
+    skeleton_json_file = request.files['skeleton_json']
 
     index_str = request.form.get('index')
     if index_str is None:
@@ -81,10 +97,6 @@ def generate_gif_inside():
     except ValueError:
         return jsonify({'error': 'Index must be an integer'}), 400
 
-    skeleton_json = request.form.get('skeleton_json')
-    if skeleton_json is None:
-        return jsonify({'error': 'No skeleton_json provided'}), 400
-
     if image_file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
 
@@ -93,6 +105,7 @@ def generate_gif_inside():
             'error': f'Invalid file type. Allowed types: {", ".join(ALLOWED_EXTENSIONS)}'
         }), 400
 
+    # 파일 크기 확인 (Flask MAX_CONTENT_LENGTH가 기본적으로 처리하지만, 재확인용)
     image_file.seek(0, os.SEEK_END)
     file_size = image_file.tell()
     image_file.seek(0)
@@ -108,24 +121,30 @@ def generate_gif_inside():
 
     gif_output_dir = os.path.join(BASE_DIR, unique_id)
     gif_path = os.path.join(gif_output_dir, "video.gif")
-    skeleton_json_path = os.path.join(gif_output_dir, 'skeleton_custom.json')
+
+    skeleton_json_path = os.path.join(gif_output_dir, 'skeleton.json')  
 
     try:
+        # 이미지 저장
         image_file.save(image_path)
-        print(f"[INFO] Image saved to: {image_path}")
+        logging.info(f"Image saved to: {image_path}")
 
+        # 출력 디렉토리 생성
         os.makedirs(gif_output_dir, exist_ok=True)
 
-        with open(skeleton_json_path, 'w', encoding='utf-8') as f:
-            f.write(skeleton_json)
-        print(f"[INFO] Skeleton JSON saved to: {skeleton_json_path}")
+        # skeleton_json 저장
+        skeleton_json_file.save(skeleton_json_path)
+        logging.info(f"Skeleton JSON saved to: {skeleton_json_path}")
 
+        # subprocess 명령어 실행
+        # 주의: image_to_animation.py의 인자가 image_path, unique_id, skeleton_json_path, index인지 꼭 확인 필요
+        # 만약 index 인자가 필요 없다면 command에서 제거하세요.
         command = [
             'python', 'image_to_animation.py',
-            image_path, unique_id, str(index), skeleton_json_path
+            image_path, unique_id, skeleton_json_path, str(index)
         ]
 
-        print(f"[INFO] Running animation command: {' '.join(command)}")
+        logging.info(f"Running animation command: {' '.join(command)}")
         result = subprocess.run(
             command,
             cwd=BASE_DIR,
@@ -135,13 +154,13 @@ def generate_gif_inside():
             timeout=300
         )
 
-        print(f"[INFO] Animation script completed successfully")
-        print(f"[INFO] Script stdout: {result.stdout}")
+        logging.info("Animation script completed successfully")
+        logging.info(f"Script stdout: {result.stdout}")
         if result.stderr:
-            print(f"[WARNING] Script stderr: {result.stderr}")
+            logging.warning(f"Script stderr: {result.stderr}")
 
+        # S3 업로드
         s3_key = f"{unique_id}/video.gif"
-
         s3.upload_file(
             gif_path,
             S3_BUCKET,
@@ -151,46 +170,46 @@ def generate_gif_inside():
                 'ContentDisposition': f'inline; filename="video.gif"'
             }
         )
-        print(f"[INFO] Uploading to S3 - Bucket: {S3_BUCKET}, Key: {s3_key}")
+        logging.info(f"Uploaded to S3 - Bucket: {S3_BUCKET}, Key: {s3_key}")
         gif_url = f"{S3_BASE_URL}/{s3_key}"
-        print(f"[INFO] Upload successful. URL: {gif_url}")
+        logging.info(f"Upload successful. URL: {gif_url}")
 
         return jsonify({'gif_url': gif_url}), 200
 
     except subprocess.TimeoutExpired:
-        print("[ERROR] Animation generation timed out")
+        logging.error("Animation generation timed out")
         return jsonify({'error': 'Animation generation timed out'}), 408
 
     except subprocess.CalledProcessError as e:
-        print(f"[ERROR] Animation generation failed: {e}")
-        print(f"[ERROR] Command output: {e.stdout}")
-        print(f"[ERROR] Command stderr: {e.stderr}")
+        logging.error(f"Animation generation failed: {e}")
+        logging.error(f"Command output: {e.stdout}")
+        logging.error(f"Command stderr: {e.stderr}")
         return jsonify({'error': 'Animation generation failed'}), 500
 
     except ClientError as e:
-        print(f"[ERROR] S3 upload failed: {e}")
+        logging.error(f"S3 upload failed: {e}")
         return jsonify({'error': 'File upload failed'}), 500
 
     except Exception as e:
-        print(f"[ERROR] Unexpected error: {e}")
+        logging.error(f"Unexpected error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
     finally:
         cleanup_files(image_path, gif_output_dir)
 
-
+# --- 메인 실행 ---
 if __name__ == '__main__':
     required_env_vars = ['S3_BUCKET_NAME', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY']
     missing_vars = [var for var in required_env_vars if not os.environ.get(var)]
 
     if missing_vars:
-        print(f"[ERROR] Missing required environment variables: {', '.join(missing_vars)}")
+        logging.error(f"Missing required environment variables: {', '.join(missing_vars)}")
         exit(1)
 
     animation_script = os.path.join(BASE_DIR, 'image_to_animation.py')
     if not os.path.isfile(animation_script):
-        print(f"[ERROR] Animation script not found: {animation_script}")
+        logging.error(f"Animation script not found: {animation_script}")
         exit(1)
 
-    print("[INFO] Starting Flask application...")
+    logging.info("Starting Flask application...")
     app.run(host='0.0.0.0', port=5000, debug=False)
