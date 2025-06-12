@@ -216,7 +216,10 @@ if __name__ == '__main__':
     missing_vars = [var for var in required_env_vars if not os.environ.get(var)]
 
     if missing_vars:
-        logging.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+        logging.error(
+            "Missing required environment variables: %s",
+            ', '.join(missing_vars)
+        )
         exit(1)
 
     animation_script = os.path.join(BASE_DIR, 'image_to_animation.py')
