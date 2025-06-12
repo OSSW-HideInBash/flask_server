@@ -82,11 +82,8 @@ def generate_gif_inside():
     if 'image' not in request.files:
         return jsonify({'error': 'No image file provided'}), 400
 
-    if 'skeleton_json' not in request.files:
-        return jsonify({'error': 'No skeleton_json file provided'}), 400
-
     image_file = request.files['image']
-    skeleton_json_file = request.files['skeleton_json']
+    skeleton_json_file = request.files.get('skeleton_json', None)
 
     index_str = request.form.get('index')
     if index_str is None:
@@ -102,16 +99,24 @@ def generate_gif_inside():
 
     if not allowed_file(image_file.filename):
         return jsonify({
-            'error': f'Invalid file type. Allowed types: {", ".join(ALLOWED_EXTENSIONS)}'
+            'error': (
+                'Invalid file type. Allowed types: '
+                f'{", ".join(ALLOWED_EXTENSIONS)}'
+            )
         }), 400
 
-    # 파일 크기 확인 (Flask MAX_CONTENT_LENGTH가 기본적으로 처리하지만, 재확인용)
+    # 파일 크기 확인
     image_file.seek(0, os.SEEK_END)
     file_size = image_file.tell()
     image_file.seek(0)
 
     if file_size > MAX_FILE_SIZE:
-        return jsonify({'error': f'File size exceeds limit ({MAX_FILE_SIZE // (1024*1024)}MB)'}), 413
+        return jsonify({
+            'error': (
+                f'File size exceeds limit '
+                f'({MAX_FILE_SIZE // (1024*1024)}MB)'
+            )
+        }), 413
 
     unique_id = str(uuid.uuid4())
 
@@ -122,7 +127,7 @@ def generate_gif_inside():
     gif_output_dir = os.path.join(BASE_DIR, unique_id)
     gif_path = os.path.join(gif_output_dir, "video.gif")
 
-    skeleton_json_path = os.path.join(gif_output_dir, 'skeleton.json')  
+    skeleton_json_path = os.path.join(gif_output_dir, 'skeleton.json')
 
     try:
         # 이미지 저장
@@ -132,17 +137,19 @@ def generate_gif_inside():
         # 출력 디렉토리 생성
         os.makedirs(gif_output_dir, exist_ok=True)
 
-        # skeleton_json 저장
-        skeleton_json_file.save(skeleton_json_path)
-        logging.info(f"Skeleton JSON saved to: {skeleton_json_path}")
-
-        # subprocess 명령어 실행
-        # 주의: image_to_animation.py의 인자가 image_path, unique_id, skeleton_json_path, index인지 꼭 확인 필요
-        # 만약 index 인자가 필요 없다면 command에서 제거하세요.
-        command = [
-            'python', 'image_to_animation.py',
-            image_path, unique_id, skeleton_json_path, str(index)
-        ]
+        # skeleton_json이 있으면 저장
+        if skeleton_json_file:
+            skeleton_json_file.save(skeleton_json_path)
+            logging.info(f"Skeleton JSON saved to: {skeleton_json_path}")
+            command = [
+                'python', 'image_to_animation_custom.py',
+                image_path, unique_id, str(index), skeleton_json_path
+            ]
+        else:
+            command = [
+                'python', 'image_to_animation.py',
+                image_path, unique_id, str(index)
+            ]
 
         logging.info(f"Running animation command: {' '.join(command)}")
         result = subprocess.run(
@@ -167,7 +174,9 @@ def generate_gif_inside():
             s3_key,
             ExtraArgs={
                 'ContentType': 'image/gif',
-                'ContentDisposition': f'inline; filename="video.gif"'
+                'ContentDisposition': (
+                    'inline; filename="video.gif"'
+                )
             }
         )
         logging.info(f"Uploaded to S3 - Bucket: {S3_BUCKET}, Key: {s3_key}")
@@ -199,7 +208,11 @@ def generate_gif_inside():
 
 # --- 메인 실행 ---
 if __name__ == '__main__':
-    required_env_vars = ['S3_BUCKET_NAME', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY']
+    required_env_vars = [
+        'S3_BUCKET_NAME',
+        'AWS_ACCESS_KEY_ID',
+        'AWS_SECRET_ACCESS_KEY'
+    ]
     missing_vars = [var for var in required_env_vars if not os.environ.get(var)]
 
     if missing_vars:
