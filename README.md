@@ -1,6 +1,8 @@
 # Flask Animation API
 
 이미지를 애니메이션 GIF로 변환하는 Flask 기반 REST API 서비스입니다.
+최신 버전은 v3이며, 이전 버전도 자유롭게 이용 가능합니다.
+
 
 ## 🚀 주요 기능
 
