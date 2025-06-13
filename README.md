@@ -9,14 +9,16 @@
 - AWS S3 자동 업로드 및 URL 반환
 - 파일 크기 제한 및 보안 검증
 - 자동 임시 파일 정리
+- 스켈레톤 JSON 데이터 없는 경우 자동으로 골격 인식
 
 ## 📋 요구사항
 
 ### 시스템 요구사항
-- Python 3.7+
+- Python 3.8+
 - Flask
 - boto3
-- `image_to_animation.py` 스크립트
+- 'image_to_animation.py' 스크립트
+- -'image_to_animation_custom.py' 스크립트
 
 ### AWS 계정 및 S3 버킷
 - AWS 계정 및 액세스 키
@@ -43,15 +45,40 @@ export AWS_REGION="ap-southeast-2"  # 선택사항 (기본값: ap-southeast-2)
 
 ### 3. 필수 파일 준비
 - `image_to_animation.py`: 애니메이션 생성 스크립트
-- `examples/drawings/`: 이미지 임시 저장 디렉토리 (자동 생성)
+- `examples/drawings/`: 이미지 임시 저장 디렉토리 (uuid 이용하여 자동 생성)
 
 ## 🚀 실행
-
+골격을 수동으로 조정하지 않았을 경우
 ```bash
-python app.py
+python image_to_animagetion.py 사진디렉토리 동작종류(0~5 integer)
 ```
+골격을 수동으로 조정한 경우
+
+python image_to_animagetion.py 사진디렉토리 동작종류(0~5 integer) skeleton.json
 
 서버는 `http://0.0.0.0:5000`에서 실행됩니다.
+
+## skeleton.json 예시
+{
+  "skeleton": [
+    { "loc": [278, 446], "name": "root", "parent": null },
+    { "loc": [278, 446], "name": "hip", "parent": "root" },
+    { "loc": [278, 191], "name": "torso", "parent": "hip" },
+    { "loc": [278, 258], "name": "neck", "parent": "torso" },
+    { "loc": [142, 200], "name": "right_shoulder", "parent": "torso" },
+    { "loc": [96, 161], "name": "right_elbow", "parent": "right_shoulder" },
+    { "loc": [58, 123], "name": "right_hand", "parent": "right_elbow" },
+    { "loc": [414, 181], "name": "left_shoulder", "parent": "torso" },
+    { "loc": [439, 136], "name": "left_elbow", "parent": "left_shoulder" },
+    { "loc": [459, 84], "name": "left_hand", "parent": "left_elbow" },
+    { "loc": [193, 446], "name": "right_hip", "parent": "root" },
+    { "loc": [181, 517], "name": "right_knee", "parent": "right_hip" },
+    { "loc": [168, 582], "name": "right_foot", "parent": "right_knee" },
+    { "loc": [362, 446], "name": "left_hip", "parent": "root" },
+    { "loc": [375, 511], "name": "left_knee", "parent": "left_hip" },
+    { "loc": [394, 569], "name": "left_foot", "parent": "left_knee" }
+  ]
+}
 
 ## 📡 API 엔드포인트
 
